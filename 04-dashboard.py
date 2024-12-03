@@ -89,7 +89,7 @@ def get_augmented_data(df, model):
     last_score = df.loc[df['YEAR'] == last_date, 'SCORE_AR'].iloc[0]
 
     # Forecast score for next 100 years using cached ARIMA
-    forecast = get_arima_forecast(df.set_index('YEAR')['SCORE_AR'], steps=100)
+    forecast = get_arima_forecast(df.set_index('YEAR')['SCORE_AR'])
     future_dates = pd.date_range(start=last_date, periods=len(forecast)+1, freq='Y')
 
     # Create initial forecast DataFrame
