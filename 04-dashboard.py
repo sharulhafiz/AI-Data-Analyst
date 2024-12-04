@@ -81,28 +81,30 @@ def get_closest_score_features(df, target_score, top_features):
     return feature_values
 
 # An augmented dataset with the forecasted values up to SCORE_AR = 100
-# Add caching to get_augmented_data
+# Add caching to get_augmented_data with ignored model parameter
 @st.cache_data
-def get_augmented_data(df, model):
+def get_augmented_data(df, _model):
     # Get the last date and score
     last_date = df['YEAR'].max()
     last_score = df.loc[df['YEAR'] == last_date, 'SCORE_AR'].iloc[0]
 
-    # Forecast score for next 100 years using cached ARIMA
-    forecast = get_arima_forecast(df.set_index('YEAR')['SCORE_AR'])
-    future_dates = pd.date_range(start=last_date, periods=len(forecast)+1, freq='Y')
+    # Set consistent forecast steps
+    forecast_steps = 6  # Adjust this number as needed
+
+    # Forecast score using cached ARIMA with fixed steps
+    forecast = get_arima_forecast(df.set_index('YEAR')['SCORE_AR'], steps=forecast_steps)
+    future_dates = pd.date_range(start=last_date, periods=len(forecast)+1, freq='Y')[1:]
 
     # Create initial forecast DataFrame
     forecast_df = pd.DataFrame({
         'YEAR': future_dates,
-        'SCORE_AR': np.concatenate([[last_score], forecast])
+        'SCORE_AR': forecast
     })
 
-    # Cache feature predictions
+    # Cache feature predictions with same steps
     for feature in [col for col in df.columns if col not in ['YEAR', 'SCORE_AR']]:
-        feature_forecast = get_arima_forecast(df.set_index('YEAR')[feature], steps=100)
-        last_feature_value = df.loc[df['YEAR'] == last_date, feature].iloc[0]
-        forecast_df[feature] = np.concatenate([[last_feature_value], feature_forecast])
+        feature_forecast = get_arima_forecast(df.set_index('YEAR')[feature], steps=forecast_steps)
+        forecast_df[feature] = feature_forecast
 
     return pd.concat([df, forecast_df], ignore_index=True)
 
