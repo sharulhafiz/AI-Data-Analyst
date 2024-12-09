@@ -4,6 +4,7 @@ import numpy as np
 import plotly.graph_objects as go
 from statsmodels.tsa.arima.model import ARIMA
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import LinearRegression
 
 # Page configuration
 st.set_page_config(page_title="Score Prediction Dashboard", layout="wide")
@@ -11,9 +12,9 @@ st.set_page_config(page_title="Score Prediction Dashboard", layout="wide")
 # Load data
 @st.cache_data
 def load_data():
-    # df = pd.read_csv('data/00_processed.csv')
-    df = pd.read_csv('data/00_combined_raw.csv')
-    df = prepare_data(df)
+    df = pd.read_csv('data/00_processed.csv')
+    # df = pd.read_csv('data/00_combined_raw.csv')
+    df = prepare_data_improved(df)
     return df
 
 def prepare_data(df):
@@ -33,6 +34,49 @@ def prepare_data(df):
     df = df.dropna(axis=1, how='all')
 
     # Convert all columns to numeric (round to 0 decimal places)
+    df = df.apply(pd.to_numeric, errors='coerce')
+    df = df.round(2)
+
+    # Move SCORE_AR to the last column
+    cols = list(df.columns)
+    cols.remove('SCORE_AR')
+    cols.append('SCORE_AR')
+    df = df[cols]
+
+    # Convert YEAR to datetime
+    df['YEAR'] = pd.to_datetime(df['YEAR'], format='%Y')
+
+    return df
+
+def prepare_data_improved(df):
+    # Make all column names uppercase
+    df.columns = df.columns.str.upper()
+
+    # Replace special characters in column names with '_'
+    df.columns = df.columns.str.replace(r'\W', '_', regex=True)
+
+    # Convert all columns to numeric
+    df = df.apply(pd.to_numeric, errors='coerce')
+
+    # Replace 0 with NaN to identify missing or noisy data
+    df = df.replace(0, np.nan)
+
+    # Interpolate missing values
+    df = df.interpolate(method='linear', limit_direction='both')
+
+    # Forward fill and backward fill as fallback methods
+    df = df.ffill().bfill()
+
+    # In each column, if any value variation is less than a threshold, replace with interpolated values
+    threshold = 5  # Adjust this value as needed
+    for col in df.columns:
+        if df[col].max() - df[col].min() < threshold:
+            df[col] = df[col].interpolate(method='linear', limit_direction='both').ffill().bfill()
+
+    # Remove columns where all values are NaN or missing
+    df = df.dropna(axis=1, how='all')
+
+    # Convert all columns to numeric (round to 2 decimal places)
     df = df.apply(pd.to_numeric, errors='coerce')
     df = df.round(2)
 
@@ -122,7 +166,7 @@ df = load_data()
 model, top_features, all_features = prepare_model(df)  # Get all features
 
 # Sidebar for page selection
-page = st.sidebar.radio("Select Page", ["Dataset Info", "Correlation Matrix", "Target Score Prediction", "Feature-based Prediction"])
+page = st.sidebar.radio("Select Page", ["Dataset Info", "Correlation Analysis", "Correlation Matrix", "Target Score Prediction", "Feature-based Prediction"])
 
 if page == "Dataset Info":
     st.title("Dataset Info")
@@ -134,6 +178,44 @@ if page == "Dataset Info":
     # Show dataset
     st.subheader("Dataset")
     st.write(df)
+
+if page == "Correlation Analysis":
+    # This page will loop all features and calculate correlation with SCORE_AR
+    # Each loop will create a scatter plot and display the correlation value
+    st.title("Correlation Analysis")
+
+    # Loop through all features
+    for feature in all_features:
+        # Skip YEAR and SCORE_AR
+        if feature in ['YEAR', 'SCORE_AR']:
+            continue
+
+        # Create scatter plot
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=df[feature], y=df['SCORE_AR'], mode='markers', name='Data'))
+
+        # Calculate correlation
+        correlation = df[feature].corr(df['SCORE_AR'])
+
+        # Fit linear regression model
+        X = df[feature].values.reshape(-1, 1)
+        y = df['SCORE_AR'].values
+        model = LinearRegression()
+        model.fit(X, y)
+        trendline = model.predict(X)
+
+        # Add trend line to the plot
+        fig.add_trace(go.Scatter(x=df[feature], y=trendline, mode='lines', name='Trend Line'))
+
+        # Update layout for better readability
+        fig.update_layout(
+            title=f"{feature} vs. SCORE_AR (Correlation: {correlation:.2f})",
+            xaxis_title=feature,
+            yaxis_title='SCORE_AR',
+            height=500
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
 
 if page == "Correlation Matrix":
     st.title("Correlation Matrix")
