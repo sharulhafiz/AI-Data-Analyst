@@ -166,7 +166,14 @@ df = load_data()
 model, top_features, all_features = prepare_model(df)  # Get all features
 
 # Sidebar for page selection
-page = st.sidebar.radio("Select Page", ["Dataset Info", "Correlation Analysis", "Correlation Matrix", "Target Score Prediction", "Feature-based Prediction"])
+page = st.sidebar.radio("Select Page", ["Dashboard (Looker)", "Dataset Info", "Correlation Analysis (Features vs SCORE_AR)", "Correlation Analysis (Features vs Year)", "Correlation Matrix", "Target Score Prediction", "Feature-based Prediction"])
+
+if page == "Dashboard (Looker)":
+    st.title("Dashboard (Looker)")
+    # st.markdown("This is a placeholder for the Looker dashboard.")
+
+    # Embed looker studio link https://lookerstudio.google.com/embed/reporting/b94a32a2-7470-42c2-b0c8-763f8de26526/page/p_tiw8b1sild
+    st.markdown('<iframe src="https://lookerstudio.google.com/embed/reporting/b94a32a2-7470-42c2-b0c8-763f8de26526/page/p_tiw8b1sild" width="100%" height="800"></iframe>', unsafe_allow_html=True)
 
 if page == "Dataset Info":
     st.title("Dataset Info")
@@ -179,7 +186,7 @@ if page == "Dataset Info":
     st.subheader("Dataset")
     st.write(df)
 
-if page == "Correlation Analysis":
+if page == "Correlation Analysis (Features vs SCORE_AR)":
     # This page will loop all features and calculate correlation with SCORE_AR
     # Each loop will create a scatter plot and display the correlation value
     st.title("Correlation Analysis")
@@ -213,6 +220,51 @@ if page == "Correlation Analysis":
             xaxis_title=feature,
             yaxis_title='SCORE_AR',
             height=500
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+if page == "Correlation Analysis (Features vs Year)":
+    # This page will loop all features and calculate correlation with SCORE_AR
+    # Each loop will create a scatter plot and display the correlation value
+    st.title("Correlation Analysis")
+    
+    # Loop through all features
+    for feature in all_features:
+        # Skip YEAR and SCORE_AR
+        if feature in ['YEAR', 'SCORE_AR']:
+            continue
+
+        # Create scatter plot
+        fig = go.Figure()
+
+        # Add feature values to the primary y-axis
+        fig.add_trace(go.Scatter(x=df['YEAR'].dt.year, y=df[feature], mode='lines+markers', name=feature, yaxis='y1'))
+
+        # Add SCORE_AR values to the secondary y-axis
+        fig.add_trace(go.Scatter(x=df['YEAR'].dt.year, y=df['SCORE_AR'], mode='lines+markers', name='SCORE_AR', yaxis='y2'))
+
+        # Calculate correlation
+        correlation = df[feature].corr(df['SCORE_AR'])
+
+        # Fit linear regression model for the feature
+        X = df['YEAR'].map(pd.Timestamp.toordinal).values.reshape(-1, 1)  # Convert YEAR to ordinal for regression
+        y = df[feature].values
+        model = LinearRegression()
+        model.fit(X, y)
+        trendline = model.predict(X)
+
+        # Add trend line to the plot
+        fig.add_trace(go.Scatter(x=df['YEAR'].dt.year, y=trendline, mode='lines', name=f'{feature} Trend Line', yaxis='y1'))
+
+        # Update layout for better readability
+        fig.update_layout(
+            title=f"{feature} vs. SCORE_AR (Correlation: {correlation:.2f})",
+            xaxis_title='YEAR',
+            yaxis=dict(title=feature, side='left'),
+            yaxis2=dict(title='SCORE_AR', side='right', overlaying='y'),
+            height=500,
+            xaxis=dict(tickmode='linear', tick0=df['YEAR'].dt.year.min(), dtick=1)  # Ensure x-axis shows only whole years
         )
 
         st.plotly_chart(fig, use_container_width=True)
