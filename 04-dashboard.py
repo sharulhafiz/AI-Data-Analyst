@@ -165,6 +165,15 @@ def get_arima_forecast(data, steps=6):
 df = load_data()
 model, top_features, all_features = prepare_model(df)  # Get all features
 
+# Allow user to upload a new dataset
+uploaded_file = st.sidebar.file_uploader("Upload a CSV file", type=['csv'])
+if uploaded_file is not None:
+    df = pd.read_csv(uploaded_file)
+    df = prepare_data_improved(df)
+    model, top_features, all_features = prepare_model(df)  # Get all features
+
+
+
 # Sidebar for page selection
 page = st.sidebar.radio("Select Page", ["Dashboard (Looker)", "Dataset Info", "Correlation Analysis (Features vs SCORE_AR)", "Correlation Analysis (Features vs Year)", "Correlation Matrix", "Target Score Prediction", "Feature-based Prediction"])
 
