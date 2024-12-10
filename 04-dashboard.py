@@ -68,12 +68,6 @@ def prepare_data_improved(df):
     # Forward fill and backward fill as fallback methods
     df = df.ffill().bfill()
 
-    # In each column, if any value variation is less than a threshold, replace with interpolated values
-    threshold = 5  # Adjust this value as needed
-    for col in df.columns:
-        if df[col].max() - df[col].min() < threshold:
-            df[col] = df[col].interpolate(method='linear', limit_direction='both').ffill().bfill()
-
     # Remove columns where all values are NaN or missing
     df = df.dropna(axis=1, how='all')
 
@@ -180,7 +174,7 @@ if uploaded_file is not None:
     model, top_features, all_features = prepare_model(df)  # Get all features
 
 # Sidebar for page selection
-page = st.sidebar.radio("Select Page", ["Dashboard (Looker)", "Dataset Correlation", "Correlation Analysis (Features vs SCORE_AR)", "Correlation Analysis (Features vs Year)", "Correlation Matrix", "Target Score Prediction", "Feature-based Prediction"])
+page = st.sidebar.radio("Select Page", ["Dataset Correlation", "Dashboard (Looker)", "Dataset Correlation", "Correlation Analysis (Features vs SCORE_AR)", "Correlation Analysis (Features vs Year)", "Correlation Matrix", "Target Score Prediction", "Feature-based Prediction"])
 
 if page == "Dashboard (Looker)":
     st.title("Dashboard (Looker)")
@@ -196,22 +190,29 @@ if page == "Dataset Correlation":
     # Show dataset
     # Calculate correlation with SCORE_AR and sort by highest correlation, excluding YEAR column
     correlation_with_score = df.drop(columns=['YEAR']).corr()['SCORE_AR'].sort_values(ascending=False)
-    
+
     # Convert to DataFrame and hide SCORE_AR from display
     correlation_df = correlation_with_score.drop('SCORE_AR').reset_index()
     correlation_df.columns = ['Feature', 'Correlation']
     correlation_df.index = correlation_df.index + 1  # Start index from 1
 
     # Display the correlation table in full width and height
-    st.dataframe(correlation_df, use_container_width=True)
+    st.dataframe(correlation_df, use_container_width=True, height=800)
+
+    # Display raw data for reference
+    st.write("Raw Data:")
+    st.dataframe(df, height=800)
 
 if page == "Correlation Analysis (Features vs SCORE_AR)":
     # This page will loop all features and calculate correlation with SCORE_AR
     # Each loop will create a scatter plot and display the correlation value
     st.title("Correlation Analysis")
 
+    # Create two columns
+    col1, col2 = st.columns(2)
+
     # Loop through all features
-    for feature in all_features:
+    for i, feature in enumerate(all_features):
         # Skip YEAR and SCORE_AR
         if feature in ['YEAR', 'SCORE_AR']:
             continue
@@ -241,7 +242,11 @@ if page == "Correlation Analysis (Features vs SCORE_AR)":
             height=500
         )
 
-        st.plotly_chart(fig, use_container_width=True)
+        # Display plots in two columns
+        if i % 2 == 0:
+            col1.plotly_chart(fig, use_container_width=True)
+        else:
+            col2.plotly_chart(fig, use_container_width=True)
 
 if page == "Correlation Analysis (Features vs Year)":
     # This page will loop all features and calculate correlation with SCORE_AR
