@@ -13,7 +13,7 @@ st.set_page_config(page_title="Score Prediction Dashboard", layout="wide")
 # Load data
 @st.cache_data
 def load_data():
-    df = pd.read_csv('data/00_processed.csv')
+    df = pd.read_csv('data/uploaded_dataset.csv')
     # df = pd.read_csv('data/00_combined_raw.csv')
     df = prepare_data_improved(df)
     return df
@@ -178,8 +178,6 @@ if uploaded_file is not None:
     df = pd.read_csv(permanent_file_path)
     df = prepare_data_improved(df)
     model, top_features, all_features = prepare_model(df)  # Get all features
-
-
 
 # Sidebar for page selection
 page = st.sidebar.radio("Select Page", ["Dashboard (Looker)", "Dataset Correlation", "Correlation Analysis (Features vs SCORE_AR)", "Correlation Analysis (Features vs Year)", "Correlation Matrix", "Target Score Prediction", "Feature-based Prediction"])
