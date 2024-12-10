@@ -175,7 +175,7 @@ if uploaded_file is not None:
 
 
 # Sidebar for page selection
-page = st.sidebar.radio("Select Page", ["Dashboard (Looker)", "Dataset Info", "Correlation Analysis (Features vs SCORE_AR)", "Correlation Analysis (Features vs Year)", "Correlation Matrix", "Target Score Prediction", "Feature-based Prediction"])
+page = st.sidebar.radio("Select Page", ["Dashboard (Looker)", "Dataset Correlation", "Correlation Analysis (Features vs SCORE_AR)", "Correlation Analysis (Features vs Year)", "Correlation Matrix", "Target Score Prediction", "Feature-based Prediction"])
 
 if page == "Dashboard (Looker)":
     st.title("Dashboard (Looker)")
@@ -184,16 +184,21 @@ if page == "Dashboard (Looker)":
     # Embed looker studio link https://lookerstudio.google.com/embed/reporting/b94a32a2-7470-42c2-b0c8-763f8de26526/page/p_tiw8b1sild
     st.markdown('<iframe src="https://lookerstudio.google.com/embed/reporting/b94a32a2-7470-42c2-b0c8-763f8de26526/page/p_tiw8b1sild" width="100%" height="800"></iframe>', unsafe_allow_html=True)
 
-if page == "Dataset Info":
-    st.title("Dataset Info")
-    st.write("This dataset contains historical data of scores for different features.")
-    st.write("The goal is to predict the score based on the selected features.")
-    st.write("The dataset contains the following columns/features:")
-    st.write(all_features)
+if page == "Dataset Correlation":
+    st.title("Dataset Correlation")
+    st.write("The dataset Correlation of columns/features with with SCORE_AR (sorted):")
 
     # Show dataset
-    st.subheader("Dataset")
-    st.write(df)
+    # Calculate correlation with SCORE_AR and sort by highest correlation, excluding YEAR column
+    correlation_with_score = df.drop(columns=['YEAR']).corr()['SCORE_AR'].sort_values(ascending=False)
+    
+    # Convert to DataFrame and hide SCORE_AR from display
+    correlation_df = correlation_with_score.drop('SCORE_AR').reset_index()
+    correlation_df.columns = ['Feature', 'Correlation']
+    correlation_df.index = correlation_df.index + 1  # Start index from 1
+
+    # Display the correlation table in full width and height
+    st.dataframe(correlation_df, use_container_width=True)
 
 if page == "Correlation Analysis (Features vs SCORE_AR)":
     # This page will loop all features and calculate correlation with SCORE_AR
