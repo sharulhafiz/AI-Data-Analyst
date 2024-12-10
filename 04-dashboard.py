@@ -203,7 +203,7 @@ if page == "Slide":
     st.title("Slide")
 
     # Embed iframe for Google Slides
-    st.markdown('<iframe src="https://docs.google.com/presentation/d/e/2PACX-1vTjW8JjufEEUv8bH8dSXVvludQ4EtUK_CdYMFCIq1H3DwGOZwtEDue1hW9KX9MS4FddOI81bNbG4X1c/embed?start=false&loop=false&delayms=3000" frameborder="0" width="960" height="569" allowfullscreen="true" mozallowfullscreen="true" webkitallowfullscreen="true"></iframe>', unsafe_allow_html=True)
+    st.markdown('<iframe src="https://docs.google.com/presentation/d/e/2PACX-1vTjW8JjufEEUv8bH8dSXVvludQ4EtUK_CdYMFCIq1H3DwGOZwtEDue1hW9KX9MS4FddOI81bNbG4X1c/embed?start=false&loop=false&delayms=3000" frameborder="0" width="100%" height="800" allowfullscreen="true" mozallowfullscreen="true" webkitallowfullscreen="true"></iframe>', unsafe_allow_html=True)
 
 if page == "Dashboard (Looker)":
     st.title("Dashboard (Looker)")
