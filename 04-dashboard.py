@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 from statsmodels.tsa.arima.model import ARIMA
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression
+import os
 
 # Page configuration
 st.set_page_config(page_title="Score Prediction Dashboard", layout="wide")
@@ -168,7 +169,13 @@ model, top_features, all_features = prepare_model(df)  # Get all features
 # Allow user to upload a new dataset
 uploaded_file = st.sidebar.file_uploader("Upload a CSV file", type=['csv'])
 if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file)
+    # Save the uploaded file to a permanent location
+    permanent_file_path = os.path.join('data', 'uploaded_dataset.csv')
+    with open(permanent_file_path, 'wb') as f:
+        f.write(uploaded_file.getbuffer())
+
+    # Load the saved file
+    df = pd.read_csv(permanent_file_path)
     df = prepare_data_improved(df)
     model, top_features, all_features = prepare_model(df)  # Get all features
 
