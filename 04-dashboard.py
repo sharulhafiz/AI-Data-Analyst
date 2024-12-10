@@ -5,6 +5,9 @@ import plotly.graph_objects as go
 from statsmodels.tsa.arima.model import ARIMA
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import StandardScaler
+from sklearn.neighbors import NearestNeighbors
+from scipy.stats import zscore
 import os
 
 # Page configuration
@@ -14,7 +17,6 @@ st.set_page_config(page_title="Score Prediction Dashboard", layout="wide")
 @st.cache_data
 def load_data():
     df = pd.read_csv('data/uploaded_dataset.csv')
-    # df = pd.read_csv('data/00_combined_raw.csv')
     df = prepare_data_improved(df)
     return df
 
@@ -100,7 +102,7 @@ def prepare_model(df):
         'feature': features,
         'importance': model.feature_importances_
     }).sort_values('importance', ascending=False)
-    top_features = feature_importance['feature'].head(10).tolist()
+    top_features = feature_importance['feature'].tolist()
 
     return model, top_features, features  # Return all features
 
@@ -119,18 +121,26 @@ def get_closest_score_features(df, target_score, top_features):
     
     return feature_values
 
-# An augmented dataset with the forecasted values up to SCORE_AR = 100
-# Add caching to get_augmented_data with ignored model parameter
+# Helper function for ARIMA predictions
+# Cache ARIMA model fits
+@st.cache_resource
+def get_arima_forecast(data, steps=6):
+    model = ARIMA(data, order=(5, 1, 0))
+    model_fit = model.fit()
+    forecast = model_fit.forecast(steps=steps)
+    return forecast
+
 @st.cache_data
-def get_augmented_data(df, _model):
+# this function will generate a forecast dataset until SCORE_AR = 100
+def get_forecast_dataset(df, _model):
     # Get the last date and score
     last_date = df['YEAR'].max()
     last_score = df.loc[df['YEAR'] == last_date, 'SCORE_AR'].iloc[0]
 
     # Set consistent forecast steps
-    forecast_steps = 6  # Adjust this number as needed
+    forecast_steps = 26  # Adjust this number as needed
 
-    # Forecast score using cached ARIMA with fixed steps
+    # Forecast score using ARIMA with fixed steps
     forecast = get_arima_forecast(df.set_index('YEAR')['SCORE_AR'], steps=forecast_steps)
     future_dates = pd.date_range(start=last_date, periods=len(forecast)+1, freq='Y')[1:]
 
@@ -143,18 +153,31 @@ def get_augmented_data(df, _model):
     # Cache feature predictions with same steps
     for feature in [col for col in df.columns if col not in ['YEAR', 'SCORE_AR']]:
         feature_forecast = get_arima_forecast(df.set_index('YEAR')[feature], steps=forecast_steps)
+        # Ensure non-negative predictions
+        feature_forecast = np.clip(feature_forecast, 0, None)
         forecast_df[feature] = feature_forecast
 
-    return pd.concat([df, forecast_df], ignore_index=True)
+        # Fit linear regression model
+        X = forecast_df['YEAR'].map(pd.Timestamp.toordinal).values.reshape(-1, 1)  # Convert YEAR to ordinal for regression
+        y = forecast_df[feature].values
+        model = LinearRegression()
+        model.fit(X, y)
+        trendline = model.predict(X)
 
-# Helper function for ARIMA predictions
-# Cache ARIMA model fits
-@st.cache_resource
-def get_arima_forecast(data, steps=6):
-    model = ARIMA(data, order=(5, 1, 0))
-    model_fit = model.fit()
-    forecast = model_fit.forecast(steps=steps)
-    return forecast
+        # Calculate Z-scores
+        z_scores = zscore(forecast_df[feature])
+
+        # Update only outlier values to match the trend
+        outliers = np.abs(z_scores) > 3  # Define outliers as values with Z-score > 3
+        forecast_df.loc[outliers, feature] = trendline[outliers]
+
+    # Append forecast to the original dataset
+    forecast_df = pd.concat([df, forecast_df], ignore_index=True)
+
+    # Round values to 0 decimal places
+    forecast_df = forecast_df.round()
+
+    return forecast_df
 
 # Load data and prepare model once at the start
 df = load_data()
@@ -174,7 +197,13 @@ if uploaded_file is not None:
     model, top_features, all_features = prepare_model(df)  # Get all features
 
 # Sidebar for page selection
-page = st.sidebar.radio("Select Page", ["Dataset Correlation", "Dashboard (Looker)", "Dataset Correlation", "Correlation Analysis (Features vs SCORE_AR)", "Correlation Analysis (Features vs Year)", "Correlation Matrix", "Target Score Prediction", "Feature-based Prediction"])
+page = st.sidebar.radio("Select Page", ["Slide", "Dataset", "Dashboard (Looker)", "Correlation", "Prediction"])
+
+if page == "Slide":
+    st.title("Slide")
+
+    # Embed iframe for Google Slides
+    st.markdown('<iframe src="https://docs.google.com/presentation/d/e/2PACX-1vTjW8JjufEEUv8bH8dSXVvludQ4EtUK_CdYMFCIq1H3DwGOZwtEDue1hW9KX9MS4FddOI81bNbG4X1c/embed?start=false&loop=false&delayms=3000" frameborder="0" width="960" height="569" allowfullscreen="true" mozallowfullscreen="true" webkitallowfullscreen="true"></iframe>', unsafe_allow_html=True)
 
 if page == "Dashboard (Looker)":
     st.title("Dashboard (Looker)")
@@ -183,229 +212,264 @@ if page == "Dashboard (Looker)":
     # Embed looker studio link https://lookerstudio.google.com/embed/reporting/b94a32a2-7470-42c2-b0c8-763f8de26526/page/p_tiw8b1sild
     st.markdown('<iframe src="https://lookerstudio.google.com/embed/reporting/b94a32a2-7470-42c2-b0c8-763f8de26526/page/p_tiw8b1sild" width="100%" height="800"></iframe>', unsafe_allow_html=True)
 
-if page == "Dataset Correlation":
-    st.title("Dataset Correlation")
-    st.write("The dataset Correlation of columns/features with with SCORE_AR (sorted):")
+if page == "Dataset":
+    st.title("Dataset")
 
-    # Show dataset
-    # Calculate correlation with SCORE_AR and sort by highest correlation, excluding YEAR column
-    correlation_with_score = df.drop(columns=['YEAR']).corr()['SCORE_AR'].sort_values(ascending=False)
+    # Create tabs
+    tab1, tab2 = st.tabs(["Dataset Correlation", "Forecast Dataset"])
 
-    # Convert to DataFrame and hide SCORE_AR from display
-    correlation_df = correlation_with_score.drop('SCORE_AR').reset_index()
-    correlation_df.columns = ['Feature', 'Correlation']
-    correlation_df.index = correlation_df.index + 1  # Start index from 1
+    with tab1:
+        st.title("Dataset Correlation")
+        st.write("The dataset Correlation of columns/features with with SCORE_AR (sorted):")
 
-    # Display the correlation table in full width and height
-    st.dataframe(correlation_df, use_container_width=True, height=800)
+        # Show dataset
+        # Calculate correlation with SCORE_AR and sort by highest correlation, excluding YEAR column
+        correlation_with_score = df.drop(columns=['YEAR']).corr()['SCORE_AR'].sort_values(ascending=False)
 
-    # Display raw data for reference
-    st.write("Raw Data:")
-    st.dataframe(df, height=800)
+        # Convert to DataFrame and hide SCORE_AR from display
+        correlation_df = correlation_with_score.drop('SCORE_AR').reset_index()
+        correlation_df.columns = ['Feature', 'Correlation']
+        correlation_df.index = correlation_df.index + 1  # Start index from 1
 
-if page == "Correlation Analysis (Features vs SCORE_AR)":
-    # This page will loop all features and calculate correlation with SCORE_AR
-    # Each loop will create a scatter plot and display the correlation value
-    st.title("Correlation Analysis")
+        # Display the correlation table in full width and height
+        st.dataframe(correlation_df, use_container_width=True, height=800)
 
-    # Create two columns
-    col1, col2 = st.columns(2)
+        # Display raw data for reference
+        st.write("Raw Data:")
+        st.dataframe(df, height=800)
 
-    # Loop through all features
-    for i, feature in enumerate(all_features):
-        # Skip YEAR and SCORE_AR
-        if feature in ['YEAR', 'SCORE_AR']:
-            continue
-
-        # Create scatter plot
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=df[feature], y=df['SCORE_AR'], mode='markers', name='Data'))
-
-        # Calculate correlation
-        correlation = df[feature].corr(df['SCORE_AR'])
-
-        # Fit linear regression model
-        X = df[feature].values.reshape(-1, 1)
-        y = df['SCORE_AR'].values
-        model = LinearRegression()
-        model.fit(X, y)
-        trendline = model.predict(X)
-
-        # Add trend line to the plot
-        fig.add_trace(go.Scatter(x=df[feature], y=trendline, mode='lines', name='Trend Line'))
-
-        # Update layout for better readability
-        fig.update_layout(
-            title=f"{feature} vs. SCORE_AR (Correlation: {correlation:.2f})",
-            xaxis_title=feature,
-            yaxis_title='SCORE_AR',
-            height=500
-        )
-
-        # Display plots in two columns
-        if i % 2 == 0:
-            col1.plotly_chart(fig, use_container_width=True)
-        else:
-            col2.plotly_chart(fig, use_container_width=True)
-
-if page == "Correlation Analysis (Features vs Year)":
-    # This page will loop all features and calculate correlation with SCORE_AR
-    # Each loop will create a scatter plot and display the correlation value
-    st.title("Correlation Analysis")
-    
-    # Loop through all features
-    for feature in all_features:
-        # Skip YEAR and SCORE_AR
-        if feature in ['YEAR', 'SCORE_AR']:
-            continue
-
-        # Create scatter plot
-        fig = go.Figure()
-
-        # Add feature values to the primary y-axis
-        fig.add_trace(go.Scatter(x=df['YEAR'].dt.year, y=df[feature], mode='lines+markers', name=feature, yaxis='y1'))
-
-        # Add SCORE_AR values to the secondary y-axis
-        fig.add_trace(go.Scatter(x=df['YEAR'].dt.year, y=df['SCORE_AR'], mode='lines+markers', name='SCORE_AR', yaxis='y2'))
-
-        # Calculate correlation
-        correlation = df[feature].corr(df['SCORE_AR'])
-
-        # Fit linear regression model for the feature
-        X = df['YEAR'].map(pd.Timestamp.toordinal).values.reshape(-1, 1)  # Convert YEAR to ordinal for regression
-        y = df[feature].values
-        model = LinearRegression()
-        model.fit(X, y)
-        trendline = model.predict(X)
-
-        # Add trend line to the plot
-        fig.add_trace(go.Scatter(x=df['YEAR'].dt.year, y=trendline, mode='lines', name=f'{feature} Trend Line', yaxis='y1'))
-
-        # Update layout for better readability
-        fig.update_layout(
-            title=f"{feature} vs. SCORE_AR (Correlation: {correlation:.2f})",
-            xaxis_title='YEAR',
-            yaxis=dict(title=feature, side='left'),
-            yaxis2=dict(title='SCORE_AR', side='right', overlaying='y'),
-            height=500,
-            xaxis=dict(tickmode='linear', tick0=df['YEAR'].dt.year.min(), dtick=1)  # Ensure x-axis shows only whole years
-        )
-
-        st.plotly_chart(fig, use_container_width=True)
-
-if page == "Correlation Matrix":
-    st.title("Correlation Matrix")
-
-    # Get top 20 features based on importance
-    feature_importance = pd.DataFrame({
-        'feature': all_features,
-        'importance': model.feature_importances_
-    }).sort_values('importance', ascending=False)
-    top_20_features = feature_importance['feature'].head(20).tolist()
-    top_20_features.append('SCORE_AR')  # Add target variable
-
-    # Create correlation matrix for top 20 features
-    correlation_matrix = df[top_20_features].corr()
-
-    # Create heatmap
-    fig = go.Figure(data=go.Heatmap(
-        z=correlation_matrix,
-        x=correlation_matrix.columns,
-        y=correlation_matrix.columns,
-        colorscale='Viridis'
-    ))
-
-    # Update layout for better readability
-    fig.update_layout(
-        height=800,
-        width=800,
-        title='Correlation Matrix (Top 20 Features)',
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
-
-if page == "Target Score Prediction":
-    # Initialize aug_df only when needed
-    aug_df = get_augmented_data(df, model)
-
-    st.title("Target Score Prediction")
-    
-    target_score = st.slider("Select Target Score", 
-                           float(0), 
-                           float(100), 
-                           float(df['SCORE_AR'].mean()))
-    
-    # Get and display closest actual values
-    closest_features = get_closest_score_features(aug_df, target_score, top_features)
-    
-    st.subheader(f"Actual Feature Values for Score closest to {target_score:.2f}")
-    st.write(f"Closest actual score: {closest_features['Current Score'].iloc[0]:.2f}")
-    
-    # Display feature values
-    st.dataframe(closest_features[['Feature', 'Value']], hide_index=True)
-
-if page == "Feature-based Prediction":
-    st.title("Feature-based Prediction")
-
-    # Create two columns
-    left_col, right_col = st.columns([1, 2])  # 1:2 ratio for better visualization
-
-    with left_col:
-        st.subheader("Feature Inputs")
-        # Create sliders for top features
-        feature_values = {}
-
-        # Initialize all features with mean values
-        for feature in all_features:
-            feature_values[feature] = df[feature].mean()
+    with tab2:
+        st.title("Forecast Dataset")
         
-        # Create sliders only for top features
-        for feature in top_features:
-            feature_values[feature] = st.slider(
-                f"{feature}",  # Shortened label
-                float(df[feature].min()),
-                float(df[feature].max()),
-                float(df[feature].mean())
+        # Get forecast dataset
+        forecast_df = get_forecast_dataset(df, model)
+        
+        # Display forecast dataset
+        st.write("Forecast Dataset:")
+        st.dataframe(forecast_df, height=800)
+
+if page == "Correlation":
+    st.title("Correlation Analysis")
+
+    # Create tabs
+    tab1, tab2, tab3 = st.tabs(["Features vs SCORE_AR", "Features vs Year", "Correlation Matrix"])
+
+    with tab1:
+        # This page will loop all features and calculate correlation with SCORE_AR
+        # Each loop will create a scatter plot and display the correlation value
+        st.title("Correlation Analysis")
+
+        # Create two columns
+        col1, col2 = st.columns(2)
+
+        # Loop through all features
+        for i, feature in enumerate(all_features):
+            # Skip YEAR and SCORE_AR
+            if feature in ['YEAR', 'SCORE_AR']:
+                continue
+
+            # Create scatter plot
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=df[feature], y=df['SCORE_AR'], mode='markers', name='Data'))
+
+            # Calculate correlation
+            correlation = df[feature].corr(df['SCORE_AR'])
+
+            # Fit linear regression model
+            X = df[feature].values.reshape(-1, 1)
+            y = df['SCORE_AR'].values
+            model = LinearRegression()
+            model.fit(X, y)
+            trendline = model.predict(X)
+
+            # Add trend line to the plot
+            fig.add_trace(go.Scatter(x=df[feature], y=trendline, mode='lines', name='Trend Line'))
+
+            # Update layout for better readability
+            fig.update_layout(
+                title=f"{feature} vs. SCORE_AR (Correlation: {correlation:.2f})",
+                xaxis_title=feature,
+                yaxis_title='SCORE_AR',
+                height=500
             )
 
-    with right_col:
-        # Make prediction using all features
-        input_data = pd.DataFrame([feature_values])
-        predicted_score = model.predict(input_data)[0]
+            # Display plots in two columns
+            if i % 2 == 0:
+                col1.plotly_chart(fig, use_container_width=True)
+            else:
+                col2.plotly_chart(fig, use_container_width=True)
 
-        st.subheader(f"Predicted Score: {predicted_score:.2f}")
+    with tab2:
+        # This page will loop all features and calculate correlation with SCORE_AR
+        # Each loop will create a scatter plot and display the correlation value
+        st.title("Correlation Analysis")
+        
+        # Loop through all features
+        for feature in all_features:
+            # Skip YEAR and SCORE_AR
+            if feature in ['YEAR', 'SCORE_AR']:
+                continue
 
-        # Historical and forecast visualization
-        fig = go.Figure()
+            # Create scatter plot
+            fig = go.Figure()
 
-        # Historical data with year only
-        fig.add_trace(go.Scatter(x=df['YEAR'].dt.strftime('%Y'),  # Convert to year only
-                                y=df['SCORE_AR'],
-                                mode='lines+markers',
-                                name='Historical Data'))
+            # Add feature values to the primary y-axis
+            fig.add_trace(go.Scatter(x=df['YEAR'].dt.year, y=df[feature], mode='lines+markers', name=feature, yaxis='y1'))
 
-        # Forecast
-        forecast = get_arima_forecast(df.set_index('YEAR')['SCORE_AR'])
-        last_date = df['YEAR'].max()
-        last_score = df.loc[df['YEAR'] == last_date, 'SCORE_AR'].iloc[0]
+            # Add SCORE_AR values to the secondary y-axis
+            fig.add_trace(go.Scatter(x=df['YEAR'].dt.year, y=df['SCORE_AR'], mode='lines+markers', name='SCORE_AR', yaxis='y2'))
 
-        # Combine last historical point with forecast
-        forecast_values = np.concatenate([[last_score], forecast])
-        future_dates = pd.date_range(start=last_date, 
-                                periods=len(forecast)+1, 
-                                freq='Y')
-        future_years = future_dates.strftime('%Y')
+            # Calculate correlation
+            correlation = df[feature].corr(df['SCORE_AR'])
 
-        # Add the forecast trace
-        fig.add_trace(go.Scatter(x=future_years,
-                                y=forecast_values,
-                                mode='lines+markers',
-                                line=dict(dash='dash'),
-                                name='Forecast'))
+            # Fit linear regression model for the feature
+            X = df['YEAR'].map(pd.Timestamp.toordinal).values.reshape(-1, 1)  # Convert YEAR to ordinal for regression
+            y = df[feature].values
+            model = LinearRegression()
+            model.fit(X, y)
+            trendline = model.predict(X)
 
-        fig.update_layout(title='Historical and Predicted Scores',
-                        xaxis_title='Year',
-                        yaxis_title='Score',
-                        height=500)
+            # Add trend line to the plot
+            fig.add_trace(go.Scatter(x=df['YEAR'].dt.year, y=trendline, mode='lines', name=f'{feature} Trend Line', yaxis='y1'))
+
+            # Update layout for better readability
+            fig.update_layout(
+                title=f"{feature} vs. SCORE_AR (Correlation: {correlation:.2f})",
+                xaxis_title='YEAR',
+                yaxis=dict(title=feature, side='left'),
+                yaxis2=dict(title='SCORE_AR', side='right', overlaying='y'),
+                height=500,
+                xaxis=dict(tickmode='linear', tick0=df['YEAR'].dt.year.min(), dtick=1)  # Ensure x-axis shows only whole years
+            )
+
+            st.plotly_chart(fig, use_container_width=True)
+
+    with tab3:
+        st.title("Correlation Matrix")
+
+        # Get top 20 features based on importance
+        feature_importance = pd.DataFrame({
+            'feature': all_features,
+            'importance': model.feature_importances_
+        }).sort_values('importance', ascending=False)
+        top_20_features = feature_importance['feature'].head(20).tolist()
+        top_20_features.append('SCORE_AR')  # Add target variable
+
+        # Create correlation matrix for top 20 features
+        correlation_matrix = df[top_20_features].corr()
+
+        # Create heatmap
+        fig = go.Figure(data=go.Heatmap(
+            z=correlation_matrix,
+            x=correlation_matrix.columns,
+            y=correlation_matrix.columns,
+            colorscale='Viridis'
+        ))
+
+        # Update layout for better readability
+        fig.update_layout(
+            height=800,
+            width=800,
+            title='Correlation Matrix (Top 20 Features)',
+        )
 
         st.plotly_chart(fig, use_container_width=True)
+
+if page == "Prediction":
+    st.title("Prediction Dashboard")
+
+    # Create tabs
+    tab1, tab2 = st.tabs(["Target Score Prediction", "Feature-based Prediction"])
+
+    with tab1:
+        # Initialize aug_df only when needed
+        aug_df = get_forecast_dataset(df, model)
+
+        st.subheader("Target Score Prediction")
+        
+        target_score = st.slider("Select Target Score", 
+                               float(aug_df['SCORE_AR'].min()), 
+                               float(aug_df['SCORE_AR'].max()), 
+                               float(aug_df['SCORE_AR'].mean()))
+        
+        # Get and display closest actual values
+        closest_features = get_closest_score_features(aug_df, target_score, top_features)
+        
+        st.subheader(f"Actual Feature Values for Score closest to {target_score:.2f}")
+        st.write(f"Closest actual score: {closest_features['Current Score'].iloc[0]:.2f}")
+        
+        # Display feature values
+        st.dataframe(closest_features[['Feature', 'Value']], hide_index=True, height=800)
+
+    with tab2:
+        st.subheader("Feature-based Prediction")
+
+        # Initialize aug_df only when needed
+        aug_df = get_forecast_dataset(df, model)
+
+        # Retrain the model with augmented dataset
+        aug_model, aug_top_features, aug_all_features, = prepare_model(aug_df)
+
+        # Create two columns
+        left_col, right_col = st.columns([1, 2])  # 1:2 ratio for better visualization
+
+        with left_col:
+            st.subheader("Feature Inputs")
+            # Create sliders for top features
+            feature_values = {}
+
+            # Initialize all features with mean values
+            for feature in aug_all_features:
+                feature_values[feature] = df[feature].mean()
+            
+            # Create sliders only for top features
+            for feature in top_features:
+                feature_values[feature] = st.slider(
+                    f"{feature}",  # Shortened label
+                    float(aug_df[feature].min()),
+                    float(aug_df[feature].max()),
+                    float(aug_df[feature].mean())
+                )
+
+        with right_col:
+            # Make prediction using all features
+            input_data = pd.DataFrame([feature_values])
+            predicted_score = aug_model.predict(input_data)[0]
+
+            st.subheader(f"Predicted Score: {predicted_score:.2f}")
+
+            # Historical and forecast visualization
+            fig = go.Figure()
+
+            # Historical data with year only
+            fig.add_trace(go.Scatter(x=df['YEAR'].dt.strftime('%Y'),  # Convert to year only
+                                    y=df['SCORE_AR'],
+                                    mode='lines+markers',
+                                    name='Historical Data'))
+
+            # Forecast
+            forecast = get_arima_forecast(df.set_index('YEAR')['SCORE_AR'],26)
+            last_date = df['YEAR'].max()
+            last_score = df.loc[df['YEAR'] == last_date, 'SCORE_AR'].iloc[0]
+
+            # Combine last historical point with forecast
+            forecast_values = np.concatenate([[last_score], forecast])
+            future_dates = pd.date_range(start=last_date, 
+                                    periods=len(forecast)+1, 
+                                    freq='Y')
+            future_years = future_dates.strftime('%Y')
+
+            # Add the forecast trace
+            fig.add_trace(go.Scatter(x=future_years,
+                                    y=forecast_values,
+                                    mode='lines+markers',
+                                    line=dict(dash='dash'),
+                                    name='Forecast'))
+
+            fig.update_layout(title='Historical and Predicted Scores',
+                            xaxis_title='Year',
+                            yaxis_title='Score',
+                            height=500)
+
+            st.plotly_chart(fig, use_container_width=True)
+
