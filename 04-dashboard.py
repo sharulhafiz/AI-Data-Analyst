@@ -171,6 +171,9 @@ def get_forecast_dataset(df, _model):
         outliers = np.abs(z_scores) > 3  # Define outliers as values with Z-score > 3
         forecast_df.loc[outliers, feature] = trendline[outliers]
 
+    # For ALUMNI column, the value should be random between year 2020 to 2024 as it should not increase more that that range
+    forecast_df['ALUMNI'] = np.random.randint(5000, 10000, size=len(forecast_df))
+
     # Append forecast to the original dataset
     forecast_df = pd.concat([df, forecast_df], ignore_index=True)
 
@@ -202,14 +205,11 @@ page = st.sidebar.radio("Select Page", ["Slide", "Dataset", "Dashboard (Looker)"
 if page == "Slide":
     st.title("Slide")
 
-    # Embed iframe for Google Slides
-    st.markdown('<iframe src="https://docs.google.com/presentation/d/e/2PACX-1vTjW8JjufEEUv8bH8dSXVvludQ4EtUK_CdYMFCIq1H3DwGOZwtEDue1hW9KX9MS4FddOI81bNbG4X1c/embed?start=false&loop=false&delayms=3000" frameborder="0" width="100%" height="800" allowfullscreen="true" mozallowfullscreen="true" webkitallowfullscreen="true"></iframe>', unsafe_allow_html=True)
+    st.markdown('<iframe src="https://docs.google.com/presentation/d/e/2PACX-1vTjW8JjufEEUv8bH8dSXVvludQ4EtUK_CdYMFCIq1H3DwGOZwtEDue1hW9KX9MS4FddOI81bNbG4X1c/embed?start=false&loop=false&delayms=3000" frameborder="0" width="100%" height="600" allowfullscreen="true" mozallowfullscreen="true" webkitallowfullscreen="true"></iframe>', unsafe_allow_html=True)
 
 if page == "Dashboard (Looker)":
     st.title("Dashboard (Looker)")
-    # st.markdown("This is a placeholder for the Looker dashboard.")
 
-    # Embed looker studio link https://lookerstudio.google.com/embed/reporting/b94a32a2-7470-42c2-b0c8-763f8de26526/page/p_tiw8b1sild
     st.markdown('<iframe src="https://lookerstudio.google.com/embed/reporting/b94a32a2-7470-42c2-b0c8-763f8de26526/page/p_tiw8b1sild" width="100%" height="800"></iframe>', unsafe_allow_html=True)
 
 if page == "Dataset":
