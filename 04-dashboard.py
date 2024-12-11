@@ -172,7 +172,9 @@ def get_forecast_dataset(df, _model):
         forecast_df.loc[outliers, feature] = trendline[outliers]
 
     # For ALUMNI column, the value should be random between year 2020 to 2024 as it should not increase more that that range
-    forecast_df['ALUMNI'] = np.random.randint(5000, 10000, size=len(forecast_df))
+    min_alumni = df['ALUMNI'].min() # min ALUMNI in df
+    max_alumni = df['ALUMNI'].max() # max ALUMNI in df
+    forecast_df['ALUMNI'] = np.random.randint(min_alumni, max_alumni, size=len(forecast_df))
 
     # Append forecast to the original dataset
     forecast_df = pd.concat([df, forecast_df], ignore_index=True)
@@ -255,9 +257,7 @@ if page == "Correlation":
     tab1, tab2, tab3 = st.tabs(["Features vs SCORE_AR", "Features vs Year", "Correlation Matrix"])
 
     with tab1:
-        # This page will loop all features and calculate correlation with SCORE_AR
-        # Each loop will create a scatter plot and display the correlation value
-        st.title("Correlation Analysis")
+        st.subheader("Features vs SCORE_AR")
 
         # Create two columns
         col1, col2 = st.columns(2)
@@ -300,10 +300,8 @@ if page == "Correlation":
                 col2.plotly_chart(fig, use_container_width=True)
 
     with tab2:
-        # This page will loop all features and calculate correlation with SCORE_AR
-        # Each loop will create a scatter plot and display the correlation value
-        st.title("Correlation Analysis")
-        
+        st.subheader("Features vs Year")
+
         # Loop through all features
         for feature in all_features:
             # Skip YEAR and SCORE_AR
@@ -347,11 +345,17 @@ if page == "Correlation":
     with tab3:
         st.title("Correlation Matrix")
 
-        # Get top 20 features based on importance
+        # Generate RandomForestRegressor model
+        model = RandomForestRegressor(n_estimators=100, random_state=42)
+        model.fit(df[all_features], df['SCORE_AR'])
+
+        # Get all features and sort based on importance
         feature_importance = pd.DataFrame({
             'feature': all_features,
             'importance': model.feature_importances_
         }).sort_values('importance', ascending=False)
+
+        # Select top 20 features
         top_20_features = feature_importance['feature'].head(20).tolist()
         top_20_features.append('SCORE_AR')  # Add target variable
 
@@ -360,7 +364,7 @@ if page == "Correlation":
 
         # Create heatmap
         fig = go.Figure(data=go.Heatmap(
-            z=correlation_matrix,
+            z=correlation_matrix.values,
             x=correlation_matrix.columns,
             y=correlation_matrix.columns,
             colorscale='Viridis'
