@@ -370,7 +370,7 @@ if page == "Correlation":
         top_20_features.append('SCORE_AR')  # Add target variable
 
         # Create correlation matrix for top 20 features
-        correlation_matrix = df[top_20_features].corr()
+        correlation_matrix = filtered_df[top_20_features].corr()
 
         # Create heatmap
         fig = go.Figure(data=go.Heatmap(
