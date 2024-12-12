@@ -13,6 +13,10 @@ import os
 # Page configuration
 st.set_page_config(page_title="Score Prediction Dashboard", layout="wide")
 
+## ============================================ ##
+## ============= Helper Functions ============= ##
+## ============================================ ##
+
 # Load data
 @st.cache_data
 def load_data():
@@ -188,18 +192,24 @@ def get_forecast_dataset(df, _model):
 df = load_data()
 model, top_features, all_features = prepare_model(df)  # Get all features
 
-# Allow user to upload a new dataset
-uploaded_file = st.sidebar.file_uploader("Upload a CSV file", type=['csv'])
-if uploaded_file is not None:
-    # Save the uploaded file to a permanent location
-    permanent_file_path = os.path.join('data', 'uploaded_dataset.csv')
-    with open(permanent_file_path, 'wb') as f:
-        f.write(uploaded_file.getbuffer())
+# # Allow user to upload a new dataset
+# uploaded_file = st.sidebar.file_uploader("Upload a CSV file", type=['csv'])
+# if uploaded_file is not None:
+#     # Save the uploaded file to a permanent location
+#     permanent_file_path = os.path.join('data', 'uploaded_dataset.csv')
+#     with open(permanent_file_path, 'wb') as f:
+#         f.write(uploaded_file.getbuffer())
 
-    # Load the saved file
-    df = pd.read_csv(permanent_file_path)
-    df = prepare_data_improved(df)
-    model, top_features, all_features = prepare_model(df)  # Get all features
+#     # Load the saved file
+#     df = pd.read_csv(permanent_file_path)
+#     df = prepare_data_improved(df)
+#     model, top_features, all_features = prepare_model(df)  # Get all features
+
+# Sidebar for years selection from main dataset
+years = st.sidebar.slider("Select Year Range", int(df['YEAR'].dt.year.min()), int(df['YEAR'].dt.year.max()), (int(df['YEAR'].dt.year.min()), int(df['YEAR'].dt.year.max())))
+
+# Filter dataset from selected years
+filtered_df = df[(df['YEAR'].dt.year >= years[0]) & (df['YEAR'].dt.year <= years[1])]
 
 # Sidebar for page selection
 page = st.sidebar.radio("Select Page", ["Slide", "Dataset", "Dashboard (Looker)", "Correlation", "Prediction"])
@@ -254,7 +264,7 @@ if page == "Correlation":
     st.title("Correlation Analysis")
 
     # Create tabs
-    tab1, tab2, tab3 = st.tabs(["Features vs SCORE_AR", "Features vs Year", "Correlation Matrix"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Features vs SCORE_AR", "Features vs Year", "Correlation Matrix", "Correlation Table"])
 
     with tab1:
         st.subheader("Features vs SCORE_AR")
@@ -270,20 +280,20 @@ if page == "Correlation":
 
             # Create scatter plot
             fig = go.Figure()
-            fig.add_trace(go.Scatter(x=df[feature], y=df['SCORE_AR'], mode='markers', name='Data'))
+            fig.add_trace(go.Scatter(x=filtered_df[feature], y=filtered_df['SCORE_AR'], mode='markers', name='Data'))
 
             # Calculate correlation
-            correlation = df[feature].corr(df['SCORE_AR'])
+            correlation = filtered_df[feature].corr(filtered_df['SCORE_AR'])
 
             # Fit linear regression model
-            X = df[feature].values.reshape(-1, 1)
-            y = df['SCORE_AR'].values
+            X = filtered_df[feature].values.reshape(-1, 1)
+            y = filtered_df['SCORE_AR'].values
             model = LinearRegression()
             model.fit(X, y)
             trendline = model.predict(X)
 
             # Add trend line to the plot
-            fig.add_trace(go.Scatter(x=df[feature], y=trendline, mode='lines', name='Trend Line'))
+            fig.add_trace(go.Scatter(x=filtered_df[feature], y=trendline, mode='lines', name='Trend Line'))
 
             # Update layout for better readability
             fig.update_layout(
@@ -312,23 +322,23 @@ if page == "Correlation":
             fig = go.Figure()
 
             # Add feature values to the primary y-axis
-            fig.add_trace(go.Scatter(x=df['YEAR'].dt.year, y=df[feature], mode='lines+markers', name=feature, yaxis='y1'))
+            fig.add_trace(go.Scatter(x=filtered_df['YEAR'].dt.year, y=filtered_df[feature], mode='lines+markers', name=feature, yaxis='y1'))
 
             # Add SCORE_AR values to the secondary y-axis
-            fig.add_trace(go.Scatter(x=df['YEAR'].dt.year, y=df['SCORE_AR'], mode='lines+markers', name='SCORE_AR', yaxis='y2'))
+            fig.add_trace(go.Scatter(x=filtered_df['YEAR'].dt.year, y=filtered_df['SCORE_AR'], mode='lines+markers', name='SCORE_AR', yaxis='y2'))
 
             # Calculate correlation
-            correlation = df[feature].corr(df['SCORE_AR'])
+            correlation = filtered_df[feature].corr(filtered_df['SCORE_AR'])
 
             # Fit linear regression model for the feature
-            X = df['YEAR'].map(pd.Timestamp.toordinal).values.reshape(-1, 1)  # Convert YEAR to ordinal for regression
-            y = df[feature].values
+            X = filtered_df['YEAR'].map(pd.Timestamp.toordinal).values.reshape(-1, 1)  # Convert YEAR to ordinal for regression
+            y = filtered_df[feature].values
             model = LinearRegression()
             model.fit(X, y)
             trendline = model.predict(X)
 
             # Add trend line to the plot
-            fig.add_trace(go.Scatter(x=df['YEAR'].dt.year, y=trendline, mode='lines', name=f'{feature} Trend Line', yaxis='y1'))
+            fig.add_trace(go.Scatter(x=filtered_df['YEAR'].dt.year, y=trendline, mode='lines', name=f'{feature} Trend Line', yaxis='y1'))
 
             # Update layout for better readability
             fig.update_layout(
@@ -347,7 +357,7 @@ if page == "Correlation":
 
         # Generate RandomForestRegressor model
         model = RandomForestRegressor(n_estimators=100, random_state=42)
-        model.fit(df[all_features], df['SCORE_AR'])
+        model.fit(filtered_df[all_features], filtered_df['SCORE_AR'])
 
         # Get all features and sort based on importance
         feature_importance = pd.DataFrame({
@@ -374,10 +384,36 @@ if page == "Correlation":
         fig.update_layout(
             height=800,
             width=800,
-            title='Correlation Matrix (Top 20 Features)',
+            title='Correlation Matrix by Features (Sorted by Importance)',
         )
 
         st.plotly_chart(fig, use_container_width=True)
+
+    with tab4:
+        st.title("Correlation Table")
+
+        # Calculate correlation of all features with SCORE_AR
+        correlation_df = filtered_df.corr()['SCORE_AR'].sort_values(ascending=False)
+
+        # Drop YEAR and SCORE_AR columns
+        correlation_df = correlation_df.drop(['YEAR', 'SCORE_AR']).reset_index()
+
+        # Sort by values of SCORE_AR column
+        correlation_df.columns = ['Feature', 'Correlation']
+        correlation_df.index = correlation_df.index + 1
+
+        # Apply color scale to the Correlation column
+        def color_scale(val):
+            color = 'green' if val > 0 else 'red'
+            return f'color: {color}'
+
+        # Apply the color scale to the Correlation column
+        styled_correlation_df = correlation_df.style.applymap(color_scale, subset=['Correlation'])
+
+        # Display the styled correlation table
+        st.dataframe(styled_correlation_df, use_container_width=True, height=800)
+
+
 
 if page == "Prediction":
     st.title("Prediction Dashboard")
