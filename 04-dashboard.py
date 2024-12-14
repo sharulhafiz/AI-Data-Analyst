@@ -205,11 +205,12 @@ model, top_features, all_features = prepare_model(df)  # Get all features
 #     df = prepare_data_improved(df)
 #     model, top_features, all_features = prepare_model(df)  # Get all features
 
-# Sidebar for years selection from main dataset
-years = st.sidebar.slider("Select Year Range", int(df['YEAR'].dt.year.min()), int(df['YEAR'].dt.year.max()), (int(df['YEAR'].dt.year.min()), int(df['YEAR'].dt.year.max())))
+# Sidebar for years selection from main dataset using checkbox
+st.sidebar.title("Filter Data")
+years = st.sidebar.multiselect("Select Years", df['YEAR'].dt.year.unique(), df['YEAR'].dt.year.unique())
 
-# Filter dataset from selected years
-filtered_df = df[(df['YEAR'].dt.year >= years[0]) & (df['YEAR'].dt.year <= years[1])]
+# Filter data based on selected years
+filtered_df = df[df['YEAR'].dt.year.isin(years)]
 
 # Sidebar for page selection
 page = st.sidebar.radio("Select Page", ["Slide", "Dataset", "Dashboard (Looker)", "Correlation", "Prediction"])
