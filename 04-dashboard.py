@@ -213,7 +213,7 @@ years = st.sidebar.multiselect("Select Years", df['YEAR'].dt.year.unique(), df['
 filtered_df = df[df['YEAR'].dt.year.isin(years)]
 
 # Sidebar for page selection
-page = st.sidebar.radio("Select Page", ["Slide", "Dataset", "Dashboard (Looker)", "Correlation", "Prediction"])
+page = st.sidebar.radio("Select Page", ["Slide", "Dataset", "Dashboard (Looker)", "Correlation", "Prediction", "Knime"])
 
 if page == "Slide":
     st.title("Slide")
@@ -414,8 +414,6 @@ if page == "Correlation":
         # Display the styled correlation table
         st.dataframe(styled_correlation_df, use_container_width=True, height=800)
 
-
-
 if page == "Prediction":
     st.title("Prediction Dashboard")
 
@@ -514,3 +512,13 @@ if page == "Prediction":
 
             st.plotly_chart(fig, use_container_width=True)
 
+if page == "Knime":
+    st.title("Knime")
+
+    tab1, tab2 = st.tabs(["Knime Workflow", "Knime Hub"])
+
+    with tab1:
+        st.image("https://s3.eu-central-1.amazonaws.com/knime-hubprod-catalog-service-eu-central-1/ff37bce5-ffef-4adc-864b-fb82722fd588?response-content-disposition=inline&response-content-encoding=gzip&response-content-type=image%2Fsvg%2Bxml&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20241214T093545Z&X-Amz-SignedHeaders=host&X-Amz-Expires=600&X-Amz-Credential=AKIAXLA4CVAR6UW4FREN%2F20241214%2Feu-central-1%2Fs3%2Faws4_request&X-Amz-Signature=b69cb5380e3ea6b4a88df0b8c175db9a5a37f6dca995bf9c026381a06f8f7291", width=800)
+
+    with tab2:
+        st.image("https://s3.eu-central-1.amazonaws.com/knime-hubprod-catalog-service-eu-central-1/ab32abd6-f5ea-43ac-b23a-f1d331336694?response-content-disposition=inline&response-content-encoding=gzip&response-content-type=image%2Fsvg%2Bxml&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20241214T093619Z&X-Amz-SignedHeaders=host&X-Amz-Expires=600&X-Amz-Credential=AKIAXLA4CVAR6UW4FREN%2F20241214%2Feu-central-1%2Fs3%2Faws4_request&X-Amz-Signature=af1fff0c8992bc17a49b46a19a9f0f9cd8bc29e1878b8d60e4c044607bd7b3bc", width=800)
