@@ -170,11 +170,10 @@ def get_forecast_dataset(df):
     forecast_steps = target_year - last_date.year
 
     # Create future dates
-    future_dates = pd.date_range(start=last_date, periods=forecast_steps + 1, freq='YE')[1:]
+    future_dates = pd.date_range(start=last_date, periods=forecast_steps + 1, freq='Y')[1:]
 
     # Create initial forecast DataFrame
     forecast_df = pd.DataFrame({'YEAR': future_dates})
-
 
     # Cache feature predictions with same steps
     for feature in [col for col in df.columns if col not in ['YEAR', 'SCORE_AR']]:
@@ -254,15 +253,16 @@ filtered_df = df[df['YEAR'].dt.year.isin(years)]
 page = st.sidebar.radio("Select Page", ["Slide", "Dataset", "Dashboard (Looker)", "Correlation", "Models", "Prediction", "Knime"])
 
 # Create sliders for each ARIMA order parameter
-p = st.sidebar.slider("ARIMA Order (p)", 0, 10, 1)
-d = st.sidebar.slider("ARIMA Order (d)", 0, 2, 1)
-q = st.sidebar.slider("ARIMA Order (q)", 0, 10, 1)
+# p = st.sidebar.slider("ARIMA Order (p)", 0, 10, 1)
+# d = st.sidebar.slider("ARIMA Order (d)", 0, 2, 1)
+# q = st.sidebar.slider("ARIMA Order (q)", 0, 10, 1)
 
 # Combine the parameters into a tuple
-order = (p, d, q)
+# order = (p, d, q)
+order = (5, 2, 1)
 
 # Display the selected order
-st.sidebar.write(f"Selected ARIMA Order: {order}")
+# st.sidebar.write(f"Selected ARIMA Order: {order}")
 
 if page == "Slide":
     st.title("Slide")
@@ -460,6 +460,15 @@ if page == "Models":
     # Get forecast dataset
     forecast_df, all_df = get_forecast_dataset(df)
 
+    # Bootstrap the original dataset to 1000 data points
+    bootstrap_df = df.sample(n=1000, replace=True, random_state=42)
+
+    # Handle outliers using Z-scores
+    for feature in [col for col in df.columns if col not in ['YEAR', 'SCORE_AR']]:
+        z_scores = zscore(bootstrap_df[feature])
+        outliers = np.abs(z_scores) > 3  # Define outliers as values with Z-score > 3
+        bootstrap_df.loc[outliers, feature] = np.nan
+
     # Define features and target
     features = [col for col in df.columns if col not in ['YEAR', 'SCORE_AR']]
     target = 'SCORE_AR'
@@ -467,6 +476,9 @@ if page == "Models":
 
     # Evaluate models on df
     scores_df = evaluate_models(df, features, target, order)
+
+    # Evaluate models on bootstrap_df
+    scores_bootstrap_df = evaluate_models(bootstrap_df, features, target, order)
 
     # Evaluate models on all_df
     scores_all_df = evaluate_models(all_df, features, target, order)
@@ -594,4 +606,4 @@ if page == "Knime":
         st.image("https://api.hub.knime.com/repository/*HNTlN8HT6SaohePM:image?version=current-state&timestamp=1734210510000", use_container_width=True)
 
     with tab2:
-        st.image("https://api.hub.knime.com/repository/*O6uvMJZT57yb6AnQ:image?version=current-state&timestamp=1734210550000", use_container_width=True)
+        st.image("https://api.hub.knime.com/repository/*rNEZsGzquoBdiyMV:image?version=current-state&timestamp=1734224880000", use_container_width=True)
