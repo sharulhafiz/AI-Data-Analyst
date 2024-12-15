@@ -114,7 +114,7 @@ def get_arima_forecast(data, steps=6):
 
     model = ARIMA(data, order=order)
     model.initialize_approximate_diffuse()
-    model_fit = model.fit(method='lbfgs')
+    model_fit = model.fit()
     forecast = model_fit.forecast(steps=steps)
     return forecast
 
@@ -490,11 +490,14 @@ if page == "Models":
     st.write("Model Scores on df:")
     st.write(pd.DataFrame(scores_df).T)
 
-    st.write("Model Scores on all_df:")
-    st.write(pd.DataFrame(scores_all_df).T)
+    st.write("Model Scores on bootstrap_df:")
+    st.write(pd.DataFrame(scores_bootstrap_df).T)
 
     st.write("Model Scores on forecast_df:")
     st.write(pd.DataFrame(scores_forecast_df).T)
+
+    st.write("Model Scores on all_df:")
+    st.write(pd.DataFrame(scores_all_df).T)
 
 
 if page == "Prediction":
@@ -603,7 +606,7 @@ if page == "Knime":
     tab1, tab2 = st.tabs(["Knime PreProcess", "Knime Prediction"])
 
     with tab1:
-        st.image("https://api.hub.knime.com/repository/*HNTlN8HT6SaohePM:image?version=current-state&timestamp=1734210510000", use_container_width=True)
+        st.image("https://api.hub.knime.com/repository/*HNTlN8HT6SaohePM:image?version=current-state&timestamp=1734210510000")
 
     with tab2:
-        st.image("https://api.hub.knime.com/repository/*rNEZsGzquoBdiyMV:image?version=current-state&timestamp=1734224880000", use_container_width=True)
+        st.image("https://api.hub.knime.com/repository/*rNEZsGzquoBdiyMV:image?version=current-state&timestamp=1734224880000")
