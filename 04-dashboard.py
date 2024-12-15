@@ -7,6 +7,9 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import NearestNeighbors
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import make_scorer, r2_score, mean_squared_error
+from sklearn.model_selection import cross_val_score
 from scipy.stats import zscore
 import os
 
@@ -17,45 +20,7 @@ st.set_page_config(page_title="Score Prediction Dashboard", layout="wide")
 ## ============= Helper Functions ============= ##
 ## ============================================ ##
 
-# Load data
-@st.cache_data
-def load_data():
-    df = pd.read_csv('data/uploaded_dataset.csv')
-    df = prepare_data_improved(df)
-    return df
-
 def prepare_data(df):
-    # Make all column names uppercase
-    df.columns = df.columns.str.upper()
-
-    # Replace special characters in column names with '_'
-    df.columns = df.columns.str.replace(r'\W', '_', regex=True)
-
-    # Convert all columns to numeric
-    df = df.apply(pd.to_numeric, errors='coerce')
-
-    # Replace 0 with forward fill and backward fill
-    df = df.replace(0, np.nan).ffill().bfill()
-
-    # Remove column where all values are 0 or NaN or missing values
-    df = df.dropna(axis=1, how='all')
-
-    # Convert all columns to numeric (round to 0 decimal places)
-    df = df.apply(pd.to_numeric, errors='coerce')
-    df = df.round(2)
-
-    # Move SCORE_AR to the last column
-    cols = list(df.columns)
-    cols.remove('SCORE_AR')
-    cols.append('SCORE_AR')
-    df = df[cols]
-
-    # Convert YEAR to datetime
-    df['YEAR'] = pd.to_datetime(df['YEAR'], format='%Y')
-
-    return df
-
-def prepare_data_improved(df):
     # Make all column names uppercase
     df.columns = df.columns.str.upper()
 
@@ -92,23 +57,32 @@ def prepare_data_improved(df):
 
     return df
 
-# Load model and get top features
+# Load data
+@st.cache_data
+def load_data():
+    # Load from gsheet https://docs.google.com/spreadsheets/d/1ngBoEOTTE-XH0dwRSYl5c6lwdDhdIch9APEuuGwqYL0/edit?gid=0#gid=0
+    url = 'https://docs.google.com/spreadsheets/d/1ngBoEOTTE-XH0dwRSYl5c6lwdDhdIch9APEuuGwqYL0/gviz/tq?tqx=out:csv'
+    df = pd.read_csv(url)
+    df = prepare_data(df)
+    return df
+
+# Load model and sort features
 @st.cache_resource
-def prepare_model(df):
+def train_model(df):
     features = [col for col in df.columns if col not in ['YEAR', 'SCORE_AR']]
     X = df[features]
     y = df['SCORE_AR']
     model = RandomForestRegressor(n_estimators=100, random_state=42)
     model.fit(X, y)
 
-    # Get top 10 features
+    # Sort features
     feature_importance = pd.DataFrame({
         'feature': features,
         'importance': model.feature_importances_
     }).sort_values('importance', ascending=False)
-    top_features = feature_importance['feature'].tolist()
+    features_sorted = feature_importance['feature'].tolist()
 
-    return model, top_features, features  # Return all features
+    return model, features, features_sorted  # Return all features
 
 # Add helper function to get closest score and features
 def get_closest_score_features(df, target_score, top_features):
@@ -125,85 +99,149 @@ def get_closest_score_features(df, target_score, top_features):
     
     return feature_values
 
-# Helper function for ARIMA predictions
+# Helper function for forecasting
+
+# Function to add variance to predictions
+def add_variance(predictions, variance_factor=0.05):
+    noise = np.random.normal(0, variance_factor * predictions.std(), predictions.shape)
+    return predictions + noise
+
 # Cache ARIMA model fits
 @st.cache_resource
 def get_arima_forecast(data, steps=6):
-    model = ARIMA(data, order=(5, 1, 0))
-    model_fit = model.fit()
+    # Prepare data for ARIMA
+    data.index = pd.date_range(start=f'{data.index[0].year}-01-01', periods=len(data), freq='Y')
+
+    model = ARIMA(data, order=order)
+    model.initialize_approximate_diffuse()
+    model_fit = model.fit(method='lbfgs')
     forecast = model_fit.forecast(steps=steps)
     return forecast
 
+# Function to evaluate models
+def evaluate_models(df, features, target, order):
+    X = df[features]
+    y = df[target]
+
+    # Split data into train and test sets
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    # Define models
+    models = {
+        'Linear Regression': LinearRegression(),
+        'Random Forest': RandomForestRegressor(n_estimators=100, random_state=42)
+    }
+
+    # Evaluate models using cross-validation
+    scores = {}
+    for name, model in models.items():
+        # R2 score
+        r2_scores = cross_val_score(model, X, y, cv=5, scoring='r2')
+        # RMSE score (using neg_root_mean_squared_error and converting to positive)
+        rmse_scores = -cross_val_score(model, X, y, cv=5, scoring='neg_root_mean_squared_error')
+        
+        scores[name] = {
+            'R2': r2_scores.mean(),
+            'RMSE': rmse_scores.mean()
+        }
+
+    # ARIMA model
+    # Note: ARIMA requires time series data, so we'll use the entire series
+    model_arima = ARIMA(y, order=order)
+    model_fit = model_arima.fit()
+    arima_forecast = model_fit.forecast(steps=len(y_test))
+    scores['ARIMA'] = {
+        'R2': r2_score(y_test, arima_forecast),
+        'RMSE': np.sqrt(mean_squared_error(y_test, arima_forecast)),
+        'AIC': model_fit.aic
+    }
+
+    return scores
+
 @st.cache_data
 # this function will generate a forecast dataset until SCORE_AR = 100
-def get_forecast_dataset(df, _model):
+def get_forecast_dataset(df):
     # Get the last date and score
     last_date = df['YEAR'].max()
     last_score = df.loc[df['YEAR'] == last_date, 'SCORE_AR'].iloc[0]
 
-    # Set consistent forecast steps
-    forecast_steps = 26  # Adjust this number as needed
+    # Set target year and forecast steps
+    target_year = 2040  # Adjust this year as needed
+    forecast_steps = target_year - last_date.year
 
-    # Forecast score using ARIMA with fixed steps
-    forecast = get_arima_forecast(df.set_index('YEAR')['SCORE_AR'], steps=forecast_steps)
-    future_dates = pd.date_range(start=last_date, periods=len(forecast)+1, freq='Y')[1:]
+    # Create future dates
+    future_dates = pd.date_range(start=last_date, periods=forecast_steps + 1, freq='YE')[1:]
 
     # Create initial forecast DataFrame
-    forecast_df = pd.DataFrame({
-        'YEAR': future_dates,
-        'SCORE_AR': forecast
-    })
+    forecast_df = pd.DataFrame({'YEAR': future_dates})
+
 
     # Cache feature predictions with same steps
     for feature in [col for col in df.columns if col not in ['YEAR', 'SCORE_AR']]:
-        feature_forecast = get_arima_forecast(df.set_index('YEAR')[feature], steps=forecast_steps)
-        # Ensure non-negative predictions
-        feature_forecast = np.clip(feature_forecast, 0, None)
-        forecast_df[feature] = feature_forecast
-
         # Fit linear regression model
-        X = forecast_df['YEAR'].map(pd.Timestamp.toordinal).values.reshape(-1, 1)  # Convert YEAR to ordinal for regression
-        y = forecast_df[feature].values
+        X = df['YEAR'].map(pd.Timestamp.toordinal).values.reshape(-1, 1)  # Convert YEAR to ordinal for regression
+        y = df[feature].values
         model = LinearRegression()
         model.fit(X, y)
-        trendline = model.predict(X)
+
+        # Generate predictions
+        future_X = future_dates.map(pd.Timestamp.toordinal).values.reshape(-1, 1)
+        predictions = model.predict(future_X)
+
+        # Add variance to predictions
+        predictions_with_variance = add_variance(predictions)
+
+        # Ensure non-negative predictions
+        predictions_with_variance = np.clip(predictions_with_variance, 0, None)
+        forecast_df[feature] = predictions_with_variance
 
         # Calculate Z-scores
         z_scores = zscore(forecast_df[feature])
 
         # Update only outlier values to match the trend
+        trendline = model.predict(future_X)
         outliers = np.abs(z_scores) > 3  # Define outliers as values with Z-score > 3
         forecast_df.loc[outliers, feature] = trendline[outliers]
+
+    # Fit linear regression model for SCORE_AR
+    X = df['YEAR'].map(pd.Timestamp.toordinal).values.reshape(-1, 1)  # Convert YEAR to ordinal for regression
+    y = df['SCORE_AR'].values
+    model = LinearRegression()
+    model.fit(X, y)
+
+    # Generate predictions for SCORE_AR
+    future_X = future_dates.map(pd.Timestamp.toordinal).values.reshape(-1, 1)
+    predictions = model.predict(future_X)
+
+    # Add variance to predictions for SCORE_AR
+    predictions_with_variance = add_variance(predictions)
+
+    # Ensure non-negative predictions for SCORE_AR
+    predictions_with_variance = np.clip(predictions_with_variance, 0, None)
+    forecast_df['SCORE_AR'] = predictions_with_variance
 
     # For ALUMNI column, the value should be random between year 2020 to 2024 as it should not increase more that that range
     min_alumni = df['ALUMNI'].min() # min ALUMNI in df
     max_alumni = df['ALUMNI'].max() # max ALUMNI in df
     forecast_df['ALUMNI'] = np.random.randint(min_alumni, max_alumni, size=len(forecast_df))
 
+    # For MENTION_POSITIVE column, the value should be random between year 2020 to 2024 as it should not increase more that that range
+    min_mention = df['MENTION_POSITIVE'].min() # min MENTION_POSITIVE in df
+    max_mention = df['MENTION_POSITIVE'].max() # max MENTION_POSITIVE in df
+    forecast_df['MENTION_POSITIVE'] = np.random.randint(min_mention, max_mention, size=len(forecast_df))
+    forecast_df['MENTION_POSITIVE'] = add_variance(forecast_df['MENTION_POSITIVE']) # add variance to MENTION_POSITIVE
+
     # Append forecast to the original dataset
-    forecast_df = pd.concat([df, forecast_df], ignore_index=True)
+    all_df = pd.concat([df, forecast_df], ignore_index=True)
 
     # Round values to 0 decimal places
-    forecast_df = forecast_df.round()
+    all_df = forecast_df.round()
 
-    return forecast_df
+    return forecast_df, all_df
 
 # Load data and prepare model once at the start
 df = load_data()
-model, top_features, all_features = prepare_model(df)  # Get all features
-
-# # Allow user to upload a new dataset
-# uploaded_file = st.sidebar.file_uploader("Upload a CSV file", type=['csv'])
-# if uploaded_file is not None:
-#     # Save the uploaded file to a permanent location
-#     permanent_file_path = os.path.join('data', 'uploaded_dataset.csv')
-#     with open(permanent_file_path, 'wb') as f:
-#         f.write(uploaded_file.getbuffer())
-
-#     # Load the saved file
-#     df = pd.read_csv(permanent_file_path)
-#     df = prepare_data_improved(df)
-#     model, top_features, all_features = prepare_model(df)  # Get all features
+model_rf, features, features_sorted = train_model(df)  # Get all features
 
 # Sidebar for years selection from main dataset using checkbox
 st.sidebar.title("Filter Data")
@@ -213,7 +251,18 @@ years = st.sidebar.multiselect("Select Years", df['YEAR'].dt.year.unique(), df['
 filtered_df = df[df['YEAR'].dt.year.isin(years)]
 
 # Sidebar for page selection
-page = st.sidebar.radio("Select Page", ["Slide", "Dataset", "Dashboard (Looker)", "Correlation", "Prediction", "Knime"])
+page = st.sidebar.radio("Select Page", ["Slide", "Dataset", "Dashboard (Looker)", "Correlation", "Models", "Prediction", "Knime"])
+
+# Create sliders for each ARIMA order parameter
+p = st.sidebar.slider("ARIMA Order (p)", 0, 10, 1)
+d = st.sidebar.slider("ARIMA Order (d)", 0, 2, 1)
+q = st.sidebar.slider("ARIMA Order (q)", 0, 10, 1)
+
+# Combine the parameters into a tuple
+order = (p, d, q)
+
+# Display the selected order
+st.sidebar.write(f"Selected ARIMA Order: {order}")
 
 if page == "Slide":
     st.title("Slide")
@@ -229,37 +278,28 @@ if page == "Dataset":
     st.title("Dataset")
 
     # Create tabs
-    tab1, tab2 = st.tabs(["Dataset Correlation", "Forecast Dataset"])
+    tab1, tab2 = st.tabs(["Dataset", "Forecast Dataset"])
 
     with tab1:
-        st.title("Dataset Correlation")
-        st.write("The dataset Correlation of columns/features with with SCORE_AR (sorted):")
+        st.title("Raw Dataset")
 
-        # Show dataset
-        # Calculate correlation with SCORE_AR and sort by highest correlation, excluding YEAR column
-        correlation_with_score = df.drop(columns=['YEAR']).corr()['SCORE_AR'].sort_values(ascending=False)
-
-        # Convert to DataFrame and hide SCORE_AR from display
-        correlation_df = correlation_with_score.drop('SCORE_AR').reset_index()
-        correlation_df.columns = ['Feature', 'Correlation']
-        correlation_df.index = correlation_df.index + 1  # Start index from 1
-
-        # Display the correlation table in full width and height
-        st.dataframe(correlation_df, use_container_width=True, height=800)
+        # Dataset summary
+        st.write("Dataset Summary:")
+        st.write(df.describe())
 
         # Display raw data for reference
         st.write("Raw Data:")
-        st.dataframe(df, height=800)
+        st.dataframe(df)
 
     with tab2:
         st.title("Forecast Dataset")
         
         # Get forecast dataset
-        forecast_df = get_forecast_dataset(df, model)
+        all_df, forecast_df = get_forecast_dataset(df)
         
         # Display forecast dataset
         st.write("Forecast Dataset:")
-        st.dataframe(forecast_df, height=800)
+        st.dataframe(all_df, height=800)
 
 if page == "Correlation":
     st.title("Correlation Analysis")
@@ -274,7 +314,7 @@ if page == "Correlation":
         col1, col2 = st.columns(2)
 
         # Loop through all features
-        for i, feature in enumerate(all_features):
+        for i, feature in enumerate(features):
             # Skip YEAR and SCORE_AR
             if feature in ['YEAR', 'SCORE_AR']:
                 continue
@@ -314,7 +354,7 @@ if page == "Correlation":
         st.subheader("Features vs Year")
 
         # Loop through all features
-        for feature in all_features:
+        for feature in features:
             # Skip YEAR and SCORE_AR
             if feature in ['YEAR', 'SCORE_AR']:
                 continue
@@ -358,11 +398,11 @@ if page == "Correlation":
 
         # Generate RandomForestRegressor model
         model = RandomForestRegressor(n_estimators=100, random_state=42)
-        model.fit(filtered_df[all_features], filtered_df['SCORE_AR'])
+        model.fit(filtered_df[features], filtered_df['SCORE_AR'])
 
         # Get all features and sort based on importance
         feature_importance = pd.DataFrame({
-            'feature': all_features,
+            'feature': features,
             'importance': model.feature_importances_
         }).sort_values('importance', ascending=False)
 
@@ -414,6 +454,37 @@ if page == "Correlation":
         # Display the styled correlation table
         st.dataframe(styled_correlation_df, use_container_width=True, height=800)
 
+if page == "Models":
+    st.title("Models Evaluation")
+
+    # Get forecast dataset
+    forecast_df, all_df = get_forecast_dataset(df)
+
+    # Define features and target
+    features = [col for col in df.columns if col not in ['YEAR', 'SCORE_AR']]
+    target = 'SCORE_AR'
+    order = (5, 1, 0)  # Example ARIMA order, adjust as needed
+
+    # Evaluate models on df
+    scores_df = evaluate_models(df, features, target, order)
+
+    # Evaluate models on all_df
+    scores_all_df = evaluate_models(all_df, features, target, order)
+
+    # Evaluate models on forecast_df
+    scores_forecast_df = evaluate_models(forecast_df, features, target, order)
+
+    # Display scores
+    st.write("Model Scores on df:")
+    st.write(pd.DataFrame(scores_df).T)
+
+    st.write("Model Scores on all_df:")
+    st.write(pd.DataFrame(scores_all_df).T)
+
+    st.write("Model Scores on forecast_df:")
+    st.write(pd.DataFrame(scores_forecast_df).T)
+
+
 if page == "Prediction":
     st.title("Prediction Dashboard")
 
@@ -422,17 +493,18 @@ if page == "Prediction":
 
     with tab1:
         # Initialize aug_df only when needed
-        aug_df = get_forecast_dataset(df, model)
+        aug_df, forecast_df = get_forecast_dataset(df)
 
         st.subheader("Target Score Prediction")
         
+        last_value = float(df['SCORE_AR'].iloc[-1])
         target_score = st.slider("Select Target Score", 
-                               float(aug_df['SCORE_AR'].min()), 
+                               float(df['SCORE_AR'].min()), 
                                float(aug_df['SCORE_AR'].max()), 
-                               float(aug_df['SCORE_AR'].mean()))
+                               last_value)
         
         # Get and display closest actual values
-        closest_features = get_closest_score_features(aug_df, target_score, top_features)
+        closest_features = get_closest_score_features(aug_df, target_score, features)
         
         st.subheader(f"Actual Feature Values for Score closest to {target_score:.2f}")
         st.write(f"Closest actual score: {closest_features['Current Score'].iloc[0]:.2f}")
@@ -444,10 +516,10 @@ if page == "Prediction":
         st.subheader("Feature-based Prediction")
 
         # Initialize aug_df only when needed
-        aug_df = get_forecast_dataset(df, model)
+        aug_df, forecast_df = get_forecast_dataset(df)
 
         # Retrain the model with augmented dataset
-        aug_model, aug_top_features, aug_all_features, = prepare_model(aug_df)
+        aug_model, aug_features, features_sorted = train_model(aug_df)
 
         # Create two columns
         left_col, right_col = st.columns([1, 2])  # 1:2 ratio for better visualization
@@ -458,16 +530,17 @@ if page == "Prediction":
             feature_values = {}
 
             # Initialize all features with mean values
-            for feature in aug_all_features:
+            for feature in aug_features:
                 feature_values[feature] = df[feature].mean()
             
             # Create sliders only for top features
-            for feature in top_features:
+            for feature in features:
+                last_value = float(df[feature].iloc[-1])  # Get the last value in df for the feature
                 feature_values[feature] = st.slider(
                     f"{feature}",  # Shortened label
-                    float(aug_df[feature].min()),
+                    float(df[feature].min()),
                     float(aug_df[feature].max()),
-                    float(aug_df[feature].mean())
+                    last_value  # Set the initial value to the last value in df
                 )
 
         with right_col:
@@ -487,12 +560,12 @@ if page == "Prediction":
                                     name='Historical Data'))
 
             # Forecast
-            forecast = get_arima_forecast(df.set_index('YEAR')['SCORE_AR'],26)
+            all_df, forecast = get_forecast_dataset(df)
             last_date = df['YEAR'].max()
             last_score = df.loc[df['YEAR'] == last_date, 'SCORE_AR'].iloc[0]
 
             # Combine last historical point with forecast
-            forecast_values = np.concatenate([[last_score], forecast])
+            forecast_values = np.concatenate([[last_score], forecast['SCORE_AR'].values])
             future_dates = pd.date_range(start=last_date, 
                                     periods=len(forecast)+1, 
                                     freq='Y')
@@ -515,10 +588,10 @@ if page == "Prediction":
 if page == "Knime":
     st.title("Knime")
 
-    tab1, tab2 = st.tabs(["Knime Workflow", "Knime Hub"])
+    tab1, tab2 = st.tabs(["Knime PreProcess", "Knime Prediction"])
 
     with tab1:
-        st.image("https://s3.eu-central-1.amazonaws.com/knime-hubprod-catalog-service-eu-central-1/ff37bce5-ffef-4adc-864b-fb82722fd588?response-content-disposition=inline&response-content-encoding=gzip&response-content-type=image%2Fsvg%2Bxml&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20241214T093545Z&X-Amz-SignedHeaders=host&X-Amz-Expires=600&X-Amz-Credential=AKIAXLA4CVAR6UW4FREN%2F20241214%2Feu-central-1%2Fs3%2Faws4_request&X-Amz-Signature=b69cb5380e3ea6b4a88df0b8c175db9a5a37f6dca995bf9c026381a06f8f7291", width=800)
+        st.image("https://api.hub.knime.com/repository/*HNTlN8HT6SaohePM:image?version=current-state&timestamp=1734210510000", use_container_width=True)
 
     with tab2:
-        st.image("https://s3.eu-central-1.amazonaws.com/knime-hubprod-catalog-service-eu-central-1/ab32abd6-f5ea-43ac-b23a-f1d331336694?response-content-disposition=inline&response-content-encoding=gzip&response-content-type=image%2Fsvg%2Bxml&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20241214T093619Z&X-Amz-SignedHeaders=host&X-Amz-Expires=600&X-Amz-Credential=AKIAXLA4CVAR6UW4FREN%2F20241214%2Feu-central-1%2Fs3%2Faws4_request&X-Amz-Signature=af1fff0c8992bc17a49b46a19a9f0f9cd8bc29e1878b8d60e4c044607bd7b3bc", width=800)
+        st.image("https://api.hub.knime.com/repository/*O6uvMJZT57yb6AnQ:image?version=current-state&timestamp=1734210550000", use_container_width=True)
